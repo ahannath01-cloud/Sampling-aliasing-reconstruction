@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sampling, Aliasing &amp; Reconstruction Simulator</title>
+<style>
+:root {
+  --bg:#f7f7f5; --panel:#ffffff; --border:#dcdad3; --text:#1a1a1a; --sub:#5a5a55;
+  --accent:#185fa5; --good:#3b6d11; --bad:#a32d2d;
+  box-sizing:border-box; padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --bg:#17171a; --panel:#232326; --border:#3a3a3d; --text:#eee; --sub:#aaa;
+  --accent:#5aa4ec; --good:#97c459; --bad:#f09595; }
+}
+:root[data-theme="dark"] { --bg:#17171a; --panel:#232326; --border:#3a3a3d; --text:#eee; --sub:#aaa;
+  --accent:#5aa4ec; --good:#97c459; --bad:#f09595; }
+html{scroll-padding-top:env(safe-area-inset-top,0px);}
+*{box-sizing:border-box;}
+body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;line-height:1.5;}
+.wrap{max-width:960px;margin:0 auto;padding:1.5rem 1rem 3rem;}
+h1{font-size:1.3rem;margin:0 0 .25rem;}
+h2{font-size:1.05rem;margin:1.6rem 0 .5rem;color:var(--accent);}
+p.sub{color:var(--sub);margin:0 0 1rem;font-size:.9rem;}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:1rem;margin-bottom:1rem;}
+.row{display:flex;flex-wrap:wrap;gap:.75rem;align-items:flex-end;margin-bottom:.5rem;}
+.field{display:flex;flex-direction:column;font-size:.8rem;color:var(--sub);gap:.25rem;}
+.field select,.field input[type=number]{padding:.35rem .4rem;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);width:110px;}
+button{background:var(--accent);color:#fff;border:none;padding:.5rem .9rem;border-radius:6px;font-size:.85rem;cursor:pointer;}
+button.sec{background:transparent;color:var(--accent);border:1px solid var(--accent);}
+.chartbox{position:relative;height:220px;margin:.5rem 0 1rem;}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:1rem;}
+@media(max-width:640px){.grid2{grid-template-columns:1fr;}}
+table{width:100%;border-collapse:collapse;font-size:.82rem;margin-top:.5rem;}
+th,td{border-bottom:1px solid var(--border);padding:.3rem .4rem;text-align:center;}
+th{color:var(--sub);font-weight:500;}
+.pill{display:inline-block;padding:.15rem .55rem;border-radius:20px;font-size:.75rem;font-weight:600;}
+.pill.good{background:rgba(59,109,17,.15);color:var(--good);}
+.pill.bad{background:rgba(163,45,45,.15);color:var(--bad);}
+.note{font-size:.85rem;color:var(--sub);border-left:3px solid var(--accent);padding:.4rem .7rem;background:rgba(24,95,165,.06);border-radius:0 6px 6px 0;margin:.5rem 0;}
+.interp{font-size:.88rem;margin-top:.4rem;}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Experiment 3 — Sampling, aliasing &amp; reconstruction</h1>
+<p class="sub">Two-tone signal x(t) = sin(2πf₁t) + 0.5·sin(2πf₂t), sampled above, at, and below the Nyquist rate 2·f<sub>max</sub>, then rebuilt with sinc interpolation. The physical sampling rate is kept distinct from the fixed high-resolution grid used only for drawing continuous curves.</p>
+
+<div class="card">
+  <h2 style="margin-top:0">1 · Signal &amp; sampling rate</h2>
+  <div class="row">
+    <div class="field"><label>f₁ (Hz)</label><input id="f1" type="number" value="5" min="1" max="50"></div>
+    <div class="field"><label>f₂ (Hz)</label><input id="f2" type="number" value="12" min="1" max="50"></div>
+    <div class="field"><label>Duration (s)</label><input id="dur" type="number" value="1" step="0.1" min="0.2" max="3"></div>
+  </div>
+  <div class="row">
+    <button class="sec" id="caseAbove">Above 2f_max (oversampled)</button>
+    <button class="sec" id="caseEqual">Equal to 2f_max (critical)</button>
+    <button class="sec" id="caseBelow">Below 2f_max (undersampled)</button>
+    <button id="runAll">Run simulation</button>
+  </div>
+  <div id="rateInfo" class="note"></div>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0">2 · Reference &amp; sampled signals</h2>
+  <div class="chartbox"><canvas id="chartSampled" role="img" aria-label="Continuous reference signal with discrete samples overlaid">Reference and sampled signal.</canvas></div>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0">3 · Reconstructed waveform (sinc interpolation)</h2>
+  <div class="chartbox"><canvas id="chartRecon" role="img" aria-label="Reconstructed waveform from sinc interpolation compared with the reference signal">Reconstructed vs reference.</canvas></div>
+  <div class="interp" id="reconInterp"></div>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0">4 · Magnitude spectra</h2>
+  <div class="grid2">
+    <div><div class="chartbox"><canvas id="chartSpecRef" role="img" aria-label="True magnitude spectrum of the continuous reference signal">Reference spectrum.</canvas></div></div>
+    <div><div class="chartbox"><canvas id="chartSpecSamp" role="img" aria-label="Magnitude spectrum of the sampled sequence, showing any aliased peaks">Sampled-signal spectrum.</canvas></div></div>
+  </div>
+  <div class="interp" id="specInterp"></div>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0">5 · Reconstruction error &amp; mandatory validation</h2>
+  <div class="chartbox"><canvas id="chartErr" role="img" aria-label="Reconstruction error waveform, the difference between reconstructed and reference signals">Reconstruction error.</canvas></div>
+  <div id="validation"></div>
+</div>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+function isDark(){ return matchMedia('(prefers-color-scheme: dark)').matches; }
+const ink = () => isDark() ? '#eee' : '#1a1a1a';
+const grid = () => isDark() ? '#3a3a3d' : '#e1e0d9';
+let charts = {};
+function upsertChart(id, config){ if(charts[id]) charts[id].destroy(); charts[id]=new Chart(document.getElementById(id), config); }
+function lineOpts(xLabel,yLabel,legend){
+  return { responsive:true, maintainAspectRatio:false, animation:false,
+    scales:{ x:{ ticks:{color:ink(),autoSkip:true,maxRotation:0}, grid:{color:grid()}, title:{display:true,text:xLabel,color:ink()} },
+             y:{ ticks:{color:ink()}, grid:{color:grid()}, title:{display:true,text:yLabel,color:ink()} } },
+    plugins:{ legend:{display:legend!==false, labels:{color:ink()}} } };
+}
+function timeOpts(xLabel,yLabel,legend){
+  return { responsive:true, maintainAspectRatio:false, animation:false,
+    scales:{ x:{ type:'linear', ticks:{color:ink()}, grid:{color:grid()}, title:{display:true,text:xLabel,color:ink()} },
+             y:{ ticks:{color:ink()}, grid:{color:grid()}, title:{display:true,text:yLabel,color:ink()} } },
+    plugins:{ legend:{display:legend!==false, labels:{color:ink()}} } };
+}
+
+function xfunc(t,f1,f2){ return Math.sin(2*Math.PI*f1*t) + 0.5*Math.sin(2*Math.PI*f2*t); }
+function sinc(x){ if(Math.abs(x)<1e-9) return 1; return Math.sin(Math.PI*x)/(Math.PI*x); }
+
+function fft(re, im){
+  const n = re.length;
+  if(n<=1) return;
+  for(let i=1,j=0;i<n;i++){
+    let bit=n>>1;
+    for(;j&bit;bit>>=1) j^=bit;
+    j^=bit;
+    if(i<j){ [re[i],re[j]]=[re[j],re[i]]; [im[i],im[j]]=[im[j],im[i]]; }
+  }
+  for(let len=2;len<=n;len<<=1){
+    const ang=-2*Math.PI/len, wr=Math.cos(ang), wi=Math.sin(ang);
+    for(let i=0;i<n;i+=len){
+      let curWr=1,curWi=0;
+      for(let k=0;k<len/2;k++){
+        const ur=re[i+k], ui=im[i+k];
+        const vr=re[i+k+len/2]*curWr-im[i+k+len/2]*curWi;
+        const vi=re[i+k+len/2]*curWi+im[i+k+len/2]*curWr;
+        re[i+k]=ur+vr; im[i+k]=ui+vi;
+        re[i+k+len/2]=ur-vr; im[i+k+len/2]=ui-vi;
+        const nwr=curWr*wr-curWi*wi, nwi=curWr*wi+curWi*wr;
+        curWr=nwr; curWi=nwi;
+      }
+    }
+  }
+}
+function nextPow2(v){ let p=1; while(p<v) p*=2; return p; }
+function magSpectrum(signal, fs, nfft){
+  nfft = nextPow2(nfft || signal.length);
+  const re = new Array(nfft).fill(0), im = new Array(nfft).fill(0);
+  for(let i=0;i<Math.min(signal.length,nfft);i++) re[i]=signal[i];
+  fft(re,im);
+  const half = nfft/2;
+  const mag = new Array(half);
+  for(let k=0;k<half;k++) mag[k]=Math.sqrt(re[k]*re[k]+im[k]*im[k])/nfft*2;
+  const freqs = Array.from({length:half},(_,k)=> k*fs/nfft);
+  return {freqs, mag};
+}
+function findPeakFreq(freqs, mag, fMin, fMax){
+  let bestI=-1, bestV=-1;
+  for(let i=0;i<freqs.length;i++){ if(freqs[i]<fMin||freqs[i]>fMax) continue; if(mag[i]>bestV){bestV=mag[i]; bestI=i;} }
+  return bestI>=0 ? {f:freqs[bestI], v:bestV} : {f:0,v:0};
+}
+function foldAlias(f, fs){ let m=f%fs; if(m>fs/2) m=fs-m; return m; }
+
+function setCase(mult){
+  const f1=+document.getElementById('f1').value, f2=+document.getElementById('f2').value;
+  const fmax=Math.max(f1,f2);
+  document.getElementById('__fs').value = (mult*2*fmax).toFixed(3);
+}
+document.getElementById('caseAbove').onclick=()=>{ setCase(1.75); run(); };
+document.getElementById('caseEqual').onclick=()=>{ setCase(1.0); run(); };
+document.getElementById('caseBelow').onclick=()=>{ setCase(0.65); run(); };
+
+// hidden fs store (kept off main row to save space, shown in note)
+const hidden = document.createElement('input'); hidden.type='hidden'; hidden.id='__fs'; hidden.value='34.000'; document.body.appendChild(hidden);
+
+function run(){
+  const f1=+document.getElementById('f1').value, f2=+document.getElementById('f2').value;
+  const dur=+document.getElementById('dur').value;
+  const fmax=Math.max(f1,f2);
+  let fs=+document.getElementById('__fs').value;
+  if(!fs || fs<=0) fs = 2*fmax; // default first run
+  const fsRef = 4000; // fixed high plotting/reference resolution, independent of fs
+
+  const nyq = 2*fmax;
+  const ratio = fs/nyq;
+  const regime = ratio>1.02?'above':(ratio<0.98?'below':'equal');
+  document.getElementById('rateInfo').innerHTML = `Sampling at f_s = ${fs.toFixed(3)} Hz, Nyquist rate 2·f_max = ${nyq.toFixed(3)} Hz (ratio ${ratio.toFixed(2)}×) — regime: <b>${regime==='above'?'above Nyquist (oversampled)':regime==='below'?'below Nyquist (undersampled)':'exactly at Nyquist (critical)'}</b>. Expected: ${regime==='above' ? 'sinc reconstruction should recover both tones essentially exactly.' : regime==='below' ? 'the higher tone will alias to a lower apparent frequency and sinc reconstruction will reproduce that wrong (aliased) frequency instead of the true one.' : "reconstruction is on a knife-edge — if a tone's samples happen to land on its zero crossings (as a pure sine at exactly its own Nyquist rate does), that component can vanish from the samples entirely."}`;
+
+  // reference (fixed high-rate grid, distinct from physical fs)
+  const Nref = Math.round(dur*fsRef);
+  const refT = Array.from({length:Nref},(_,i)=>i/fsRef);
+  const refX = refT.map(t=>xfunc(t,f1,f2));
+
+  // physical samples
+  const Ns = Math.floor(dur*fs);
+  const sampT = Array.from({length:Ns},(_,i)=>i/fs);
+  const sampX = sampT.map(t=>xfunc(t,f1,f2));
+
+  // chart 2: reference + samples (linear time axis: samples placed at their true t, not snapped to the plotting grid)
+  upsertChart('chartSampled', { type:'line', data:{ datasets:[
+    {label:'Reference x(t)', data:refT.map((t,i)=>({x:t,y:refX[i]})), borderColor:'#2a78d6', borderWidth:1.2, pointRadius:0},
+    {label:'Samples', data:sampT.map((t,i)=>({x:t,y:sampX[i]})), borderColor:'#e34948', backgroundColor:'#e34948', pointRadius:4, showLine:false }
+  ]}, options: timeOpts('t (s)','amplitude') });
+
+  // sinc reconstruction at reference grid
+  const recon = refT.map(t=>{
+    let s=0;
+    for(let n=0;n<Ns;n++) s += sampX[n]*sinc(fs*(t-sampT[n]));
+    return s;
+  });
+  upsertChart('chartRecon', { type:'line', data:{ datasets:[
+    {label:'Reference x(t)', data:refT.map((t,i)=>({x:t,y:refX[i]})), borderColor:'#2a78d6', borderWidth:1, pointRadius:0},
+    {label:'Sinc-reconstructed', data:refT.map((t,i)=>({x:t,y:recon[i]})), borderColor:'#1baf7a', borderWidth:1.3, borderDash:[4,3], pointRadius:0}
+  ]}, options: timeOpts('t (s)','amplitude') });
+
+  const err = refX.map((v,i)=>recon[i]-v);
+  const rms = Math.sqrt(err.reduce((s,v)=>s+v*v,0)/err.length);
+  document.getElementById('reconInterp').innerHTML = `<b>Observation:</b> RMS reconstruction error = ${rms.toFixed(4)}. `+
+    (regime==='above' ? (rms<0.05 ? 'This is small, confirming perfect (Nyquist-satisfying) reconstruction as theory predicts.' : 'This is larger than expected for an oversampled case — check the sinc sum span or sample count.') :
+     regime==='below' ? 'This is large, as expected: with fewer samples per cycle than the Nyquist theorem requires, sinc interpolation reconstructs a smooth signal that matches the samples perfectly but is the aliased low-frequency image, not the true high-frequency tone.' :
+     'At exactly the Nyquist rate the result is sensitive to sampling phase; a nonzero error here indicates a tone was sampled near its zero crossings and partially or fully lost, which is the classic critical-sampling failure mode, not a bug in the reconstruction formula.');
+
+  // spectra
+  const refSpec = magSpectrum(refX, fsRef, nextPow2(refX.length));
+  const dispMax = fmax*2.2;
+  upsertChart('chartSpecRef', { type:'line', data:{ labels:refSpec.freqs.filter(f=>f<=dispMax).map(f=>f.toFixed(1)), datasets:[
+    {label:'|X(f)| reference', data:refSpec.mag.slice(0, refSpec.freqs.filter(f=>f<=dispMax).length), borderColor:'#2a78d6', borderWidth:1.3, pointRadius:0}
+  ]}, options: lineOpts('f (Hz)','magnitude') });
+
+  const sampSpec = magSpectrum(sampX, fs, nextPow2(sampX.length));
+  upsertChart('chartSpecSamp', { type:'line', data:{ labels:sampSpec.freqs.map(f=>f.toFixed(1)), datasets:[
+    {label:'|X(f)| sampled (baseband)', data:sampSpec.mag, borderColor:'#e34948', borderWidth:1.3, pointRadius:0}
+  ]}, options: lineOpts('f (Hz)','magnitude') });
+
+  const peak1 = findPeakFreq(sampSpec.freqs, sampSpec.mag, 0.3, fs/2);
+  const aliasF1 = foldAlias(f1, fs), aliasF2 = foldAlias(f2, fs);
+  document.getElementById('specInterp').innerHTML = `<b>Observation:</b> the reference spectrum shows the true tones at ${f1} Hz and ${f2} Hz. The sampled-signal spectrum's baseband (0 to f_s/2 = ${(fs/2).toFixed(2)} Hz) should, by the folding rule, show energy at |f − round(f/f_s)·f_s| = ${aliasF1.toFixed(2)} Hz (from f₁) and ${aliasF2.toFixed(2)} Hz (from f₂). `+
+    (regime==='below' ? 'Because at least one true tone exceeds f_s/2, its baseband image sits at a different (aliased) frequency than its true value — the visual signature of aliasing.' : 'Since both tones already lie at or below f_s/2, their baseband positions equal their true frequencies, so no aliasing occurs here.');
+
+  upsertChart('chartErr', { type:'line', data:{datasets:[{label:'Reconstruction error', data:refT.map((t,i)=>({x:t,y:err[i]})), borderColor:'#6250d6', borderWidth:1.1, pointRadius:0}]},
+    options: timeOpts('t (s)','error', false) });
+
+  // Mandatory validation: manual aliased-frequency calculation for undersampled case
+  let valHtml = '';
+  if(regime==='below'){
+    const overNyquistTones = [[1,f1],[2,f2]].filter(([,f])=>f>fs/2);
+    valHtml += '<table><tr><th>Tone</th><th>True f (Hz)</th><th>round(f/f_s)</th><th>Manual alias calc</th><th>Expected aliased f (Hz)</th></tr>';
+    overNyquistTones.forEach(([which,f])=>{
+      const m = Math.round(f/fs);
+      const raw = Math.abs(f-m*fs);
+      const folded = raw>fs/2 ? fs-raw : raw;
+      valHtml += `<tr><td>f${which}</td><td>${f}</td><td>${m}</td><td>|${f} − ${m}×${fs.toFixed(2)}| = ${raw.toFixed(2)}</td><td>${folded.toFixed(2)}</td></tr>`;
+    });
+    valHtml += '</table>';
+    const detectedNear = overNyquistTones.some(([,f])=> Math.abs(peak1.f - foldAlias(f,fs)) < Math.max(1, fs*0.05));
+    valHtml += `<div style="margin-top:.4rem"><span class="pill ${detectedNear?'good':'bad'}">${detectedNear? 'Manually-calculated aliased frequency matches the peak detected in the sampled spectrum ('+peak1.f.toFixed(2)+' Hz)':'Detected peak ('+peak1.f.toFixed(2)+' Hz) does not clearly match the manual calculation — try a longer duration for finer spectral resolution'}</span></div>`;
+  } else {
+    valHtml = '<p class="sub">Mandatory validation applies to the undersampled case — select "Below 2f_max" above to compute and check the manually-derived aliased frequency.</p>';
+  }
+  document.getElementById('validation').innerHTML = valHtml;
+}
+
+document.getElementById('runAll').onclick = run;
+setCase(1.0);
+run();
+</script>
+</body>
+</html>
